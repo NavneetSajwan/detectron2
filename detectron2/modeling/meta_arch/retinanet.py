@@ -157,6 +157,7 @@ class RetinaNet(nn.Module):
         head = RetinaNetHead(cfg, feature_shapes)
         anchor_generator = build_anchor_generator(cfg, feature_shapes)
         return {
+
             "backbone": backbone,
             "head": head,
             "anchor_generator": anchor_generator,
@@ -248,9 +249,11 @@ class RetinaNet(nn.Module):
         features = [features[f] for f in self.head_in_features]
 
         anchors = self.anchor_generator(features)
-        pred_logits, pred_anchor_deltas = self.head(features)
+        pred_logits, pred_logits_1, pred_logits_2, pred_anchor_deltas = self.head(features)
         # Transpose the Hi*Wi*A dimension to the middle:
         pred_logits = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits]
+        pred_logits_1 = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits_1]
+        pred_logits_2 = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits_2]
         pred_anchor_deltas = [permute_to_N_HWA_K(x, 4) for x in pred_anchor_deltas]
 
         if self.training:
@@ -259,7 +262,7 @@ class RetinaNet(nn.Module):
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
 
             gt_labels, gt_boxes = self.label_anchors(anchors, gt_instances)
-            losses = self.losses(anchors, pred_logits, gt_labels, pred_anchor_deltas, gt_boxes)
+            losses = self.losses(anchors, pred_logits, pred_logits_1, pred_logits_2, gt_labels, pred_anchor_deltas, gt_boxes)
 
             if self.vis_period > 0:
                 storage = get_event_storage()
@@ -284,7 +287,7 @@ class RetinaNet(nn.Module):
                 processed_results.append({"instances": r})
             return processed_results
 
-    def losses(self, anchors, pred_logits, gt_labels, pred_anchor_deltas, gt_boxes):
+    def losses(self, anchors, pred_logits, pred_logits_1, pred_logits_2, gt_labels, pred_anchor_deltas, gt_boxes):
         """
         Args:
             anchors (list[Boxes]): a list of #feature level Boxes
@@ -327,6 +330,22 @@ class RetinaNet(nn.Module):
             reduction="sum",
         )
 
+        loss_cls_1 = sigmoid_focal_loss_jit(
+            cat(pred_logits_1, dim=1)[valid_mask],
+            gt_labels_target.to(pred_logits_1[0].dtype),
+            alpha=self.focal_loss_alpha,
+            gamma=self.focal_loss_gamma,
+            reduction="sum",
+        )
+
+        loss_cls_2 = sigmoid_focal_loss_jit(
+            cat(pred_logits_2, dim=1)[valid_mask],
+            gt_labels_target.to(pred_logits_2[0].dtype),
+            alpha=self.focal_loss_alpha,
+            gamma=self.focal_loss_gamma,
+            reduction="sum",
+        )
+
         if self.box_reg_loss_type == "smooth_l1":
             loss_box_reg = smooth_l1_loss(
                 cat(pred_anchor_deltas, dim=1)[pos_mask],
@@ -347,6 +366,8 @@ class RetinaNet(nn.Module):
 
         return {
             "loss_cls": loss_cls / self.loss_normalizer,
+            "loss_cls_1": loss_cls_1 / self.loss_normalizer,
+            "loss_cls_2": loss_cls_2 / self.loss_normalizer,
             "loss_box_reg": loss_box_reg / self.loss_normalizer,
         }
 
@@ -539,14 +560,30 @@ class RetinaNetHead(nn.Module):
             logger.warn("Shared norm does not work well for BN, SyncBN, expect poor results")
 
         cls_subnet = []
+        cls_subnet_1 = []
+        cls_subnet_2 = []
         bbox_subnet = []
         for in_channels, out_channels in zip([input_shape[0].channels] + conv_dims, conv_dims):
+            
             cls_subnet.append(
                 nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
             )
+            cls_subnet_1.append(
+                nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+            )
+            cls_subnet_2.append(
+                nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+            )
+
             if norm:
                 cls_subnet.append(get_norm(norm, out_channels))
+                cls_subnet_1.append(get_norm(norm, out_channels))
+                cls_subnet_2.append(get_norm(norm, out_channels))
+
             cls_subnet.append(nn.ReLU())
+            cls_subnet_1.append(nn.ReLU())
+            cls_subnet_2.append(nn.ReLU())
+
             bbox_subnet.append(
                 nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
             )
@@ -555,6 +592,9 @@ class RetinaNetHead(nn.Module):
             bbox_subnet.append(nn.ReLU())
 
         self.cls_subnet = nn.Sequential(*cls_subnet)
+        self.cls_subnet_1 = nn.Sequential(*cls_subnet_1)
+        self.cls_subnet_2 = nn.Sequential(*cls_subnet_2)
+        
         self.bbox_subnet = nn.Sequential(*bbox_subnet)
         self.cls_score = nn.Conv2d(
             conv_dims[-1], num_anchors * num_classes, kernel_size=3, stride=1, padding=1
@@ -564,7 +604,7 @@ class RetinaNetHead(nn.Module):
         )
 
         # Initialization
-        for modules in [self.cls_subnet, self.bbox_subnet, self.cls_score, self.bbox_pred]:
+        for modules in [self.cls_subnet,self.cls_subnet_1,self.cls_subnet_2, self.bbox_subnet, self.cls_score, self.bbox_pred]:
             for layer in modules.modules():
                 if isinstance(layer, nn.Conv2d):
                     torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
@@ -608,8 +648,12 @@ class RetinaNetHead(nn.Module):
                 relative offset between the anchor and the ground truth box.
         """
         logits = []
+        logits_1 = []
+        logits_2 = []
         bbox_reg = []
         for feature in features:
             logits.append(self.cls_score(self.cls_subnet(feature)))
+            logits_1.append(self.cls_score(self.cls_subnet(feature)))
+            logits_2.append(self.cls_score(self.cls_subnet(feature)))
             bbox_reg.append(self.bbox_pred(self.bbox_subnet(feature)))
-        return logits, bbox_reg
+        return logits, logits_1, logits_2, bbox_reg
