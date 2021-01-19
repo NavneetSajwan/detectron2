@@ -108,6 +108,8 @@ class Metadata(types.SimpleNamespace):
 
     _RENAMED = {
         "class_names": "thing_classes",
+        "class_names_1": "thing_classes_1",
+        "class_names_2": "thing_classes_2",
         "dataset_id_to_contiguous_id": "thing_dataset_id_to_contiguous_id",
         "stuff_class_names": "stuff_classes",
     }
