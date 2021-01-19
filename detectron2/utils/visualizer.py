@@ -520,16 +520,17 @@ class Visualizer:
 
     draw_panoptic_seg_predictions = draw_panoptic_seg  # backward compatibility
 
-    def draw_dataset_dict(self, dic):
+    def draw_dataset_dict(self, dic, class_str):
         """
         Draw annotations/segmentaions in Detectron2 Dataset format.
 
         Args:
             dic (dict): annotation/segmentation data of one image, in Detectron2 Dataset format.
-
+            class_str : it can take either 'part', 'fr' or 'lr'
         Returns:
             output (VisImage): image object with visualizations.
         """
+        arg2label = {'part':('category_id','thing_classes'), 'fr':('category_id_1','thing_classes_1'), 'lr':('category_id_2','thing_classes_2')}
         annos = dic.get("annotations", None)
         if annos:
             if "segmentation" in annos[0]:
@@ -550,13 +551,15 @@ class Visualizer:
             ]
 
             colors = None
-            category_ids = [x["category_id"] for x in annos]
+            category_ids = [x[arg2label[class_str][0]] for x in annos]
+            # category_ids = [x["category_id"] for x in annos]
             if self._instance_mode == ColorMode.SEGMENTATION and self.metadata.get("thing_colors"):
                 colors = [
                     self._jitter([x / 255 for x in self.metadata.thing_colors[c]])
                     for c in category_ids
                 ]
-            names = self.metadata.get("thing_classes", None)
+            names = self.metadata.get(arg2label[class_str][1], None)
+            # names = self.metadata.get("thing_classes", None)
             labels = _create_text_labels(
                 category_ids,
                 scores=None,
