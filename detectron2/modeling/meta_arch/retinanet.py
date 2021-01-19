@@ -260,7 +260,7 @@ class RetinaNet(nn.Module):
             assert not torch.jit.is_scripting(), "Not supported"
             assert "instances" in batched_inputs[0], "Instance annotations are missing in training!"
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
-
+            pdb.set_trace()
             gt_labels, gt_boxes = self.label_anchors(anchors, gt_instances)
             losses = self.losses(anchors, pred_logits, pred_logits_1, pred_logits_2, gt_labels, pred_anchor_deltas, gt_boxes)
 
