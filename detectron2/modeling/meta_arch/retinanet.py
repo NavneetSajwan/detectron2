@@ -252,7 +252,7 @@ class RetinaNet(nn.Module):
         anchors = self.anchor_generator(features)
         pred_logits, pred_logits_1, pred_logits_2, pred_anchor_deltas = self.head(features)
         # Transpose the Hi*Wi*A dimension to the middle:
-        pdb.set_trace()
+        # pdb.set_trace()
         pred_logits = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits]
         pred_logits_1 = [permute_to_N_HWA_K(x, 3) for x in pred_logits_1]
         pred_logits_2 = [permute_to_N_HWA_K(x, 3) for x in pred_logits_2]
@@ -262,7 +262,7 @@ class RetinaNet(nn.Module):
             assert not torch.jit.is_scripting(), "Not supported"
             assert "instances" in batched_inputs[0], "Instance annotations are missing in training!"
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
-            pdb.set_trace()
+            # pdb.set_trace()
             gt_labels, gt_labels_1, gt_labels_2, gt_boxes = self.label_anchors(anchors, gt_instances)
             losses = self.losses(anchors, pred_logits, pred_logits_1, pred_logits_2, gt_labels, gt_labels_1, gt_labels_2, pred_anchor_deltas, gt_boxes)
 
