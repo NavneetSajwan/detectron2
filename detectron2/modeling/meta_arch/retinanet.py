@@ -647,12 +647,18 @@ class RetinaNetHead(nn.Module):
         self.cls_score = nn.Conv2d(
             conv_dims[-1], num_anchors * num_classes, kernel_size=3, stride=1, padding=1
         )
+        self.cls_score_1 = nn.Conv2d(
+            conv_dims[-1], num_anchors * 3, kernel_size=3, stride=1, padding=1
+        )
+        self.cls_score_2 = nn.Conv2d(
+            conv_dims[-1], num_anchors * 3, kernel_size=3, stride=1, padding=1
+        )
         self.bbox_pred = nn.Conv2d(
             conv_dims[-1], num_anchors * 4, kernel_size=3, stride=1, padding=1
         )
 
         # Initialization
-        for modules in [self.cls_subnet,self.cls_subnet_1,self.cls_subnet_2, self.bbox_subnet, self.cls_score, self.bbox_pred]:
+        for modules in [self.cls_subnet,self.cls_subnet_1,self.cls_subnet_2, self.bbox_subnet, self.cls_score, self.cls_score_1, self.cls_score_2, self.bbox_pred]:
             for layer in modules.modules():
                 if isinstance(layer, nn.Conv2d):
                     torch.nn.init.normal_(layer.weight, mean=0, std=0.01)
@@ -661,6 +667,8 @@ class RetinaNetHead(nn.Module):
         # Use prior in model initialization to improve stability
         bias_value = -(math.log((1 - prior_prob) / prior_prob))
         torch.nn.init.constant_(self.cls_score.bias, bias_value)
+        torch.nn.init.constant_(self.cls_score_1.bias, bias_value)
+        torch.nn.init.constant_(self.cls_score_2.bias, bias_value)
 
     @classmethod
     def from_config(cls, cfg, input_shape: List[ShapeSpec]):
@@ -701,7 +709,7 @@ class RetinaNetHead(nn.Module):
         bbox_reg = []
         for feature in features:
             logits.append(self.cls_score(self.cls_subnet(feature)))
-            logits_1.append(self.cls_score(self.cls_subnet(feature)))
-            logits_2.append(self.cls_score(self.cls_subnet(feature)))
+            logits_1.append(self.cls_score_1(self.cls_subnet_1(feature)))
+            logits_2.append(self.cls_score_2(self.cls_subnet_2(feature)))
             bbox_reg.append(self.bbox_pred(self.bbox_subnet(feature)))
         return logits, logits_1, logits_2, bbox_reg
