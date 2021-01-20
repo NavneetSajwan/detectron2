@@ -252,6 +252,7 @@ class RetinaNet(nn.Module):
         anchors = self.anchor_generator(features)
         pred_logits, pred_logits_1, pred_logits_2, pred_anchor_deltas = self.head(features)
         # Transpose the Hi*Wi*A dimension to the middle:
+        pdb.set_trace()
         pred_logits = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits]
         pred_logits_1 = [permute_to_N_HWA_K(x, 3) for x in pred_logits_1]
         pred_logits_2 = [permute_to_N_HWA_K(x, 3) for x in pred_logits_2]
