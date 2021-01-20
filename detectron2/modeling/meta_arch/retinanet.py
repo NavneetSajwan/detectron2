@@ -366,7 +366,7 @@ class RetinaNet(nn.Module):
         )
 
         loss_cls_1 = sigmoid_focal_loss_jit(
-            cat(pred_logits_1, dim=1)[valid_mask_1],
+            cat(pred_logits_1, dim=1)[valid_mask],
             gt_labels_target_1.to(pred_logits_1[0].dtype),
             alpha=self.focal_loss_alpha,
             gamma=self.focal_loss_gamma,
@@ -374,7 +374,7 @@ class RetinaNet(nn.Module):
         )
 
         loss_cls_2 = sigmoid_focal_loss_jit(
-            cat(pred_logits_2, dim=1)[valid_mask_2],
+            cat(pred_logits_2, dim=1)[valid_mask],
             gt_labels_target_2.to(pred_logits_2[0].dtype),
             alpha=self.focal_loss_alpha,
             gamma=self.focal_loss_gamma,
