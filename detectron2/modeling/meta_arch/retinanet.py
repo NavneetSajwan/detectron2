@@ -288,7 +288,7 @@ class RetinaNet(nn.Module):
                 processed_results.append({"instances": r})
             return processed_results
 
-    def losses(self, anchors, pred_logits, pred_logits_1, pred_logits_2, gt_labels, pred_anchor_deltas, gt_boxes):
+    def losses(self, anchors, pred_logits, pred_logits_1, pred_logits_2, gt_labels, gt_labels_1, gt_labels_2, pred_anchor_deltas, gt_boxes):
         """
         Args:
             anchors (list[Boxes]): a list of #feature level Boxes
