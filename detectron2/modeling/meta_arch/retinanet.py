@@ -253,8 +253,8 @@ class RetinaNet(nn.Module):
         pred_logits, pred_logits_1, pred_logits_2, pred_anchor_deltas = self.head(features)
         # Transpose the Hi*Wi*A dimension to the middle:
         pred_logits = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits]
-        pred_logits_1 = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits_1]
-        pred_logits_2 = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits_2]
+        pred_logits_1 = [permute_to_N_HWA_K(x, 3) for x in pred_logits_1]
+        pred_logits_2 = [permute_to_N_HWA_K(x, 3) for x in pred_logits_2]
         pred_anchor_deltas = [permute_to_N_HWA_K(x, 4) for x in pred_anchor_deltas]
 
         if self.training:
@@ -262,8 +262,8 @@ class RetinaNet(nn.Module):
             assert "instances" in batched_inputs[0], "Instance annotations are missing in training!"
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
             pdb.set_trace()
-            gt_labels, gt_boxes = self.label_anchors(anchors, gt_instances)
-            losses = self.losses(anchors, pred_logits, pred_logits_1, pred_logits_2, gt_labels, pred_anchor_deltas, gt_boxes)
+            gt_labels, gt_labels_1, gt_labels_2, gt_boxes = self.label_anchors(anchors, gt_instances)
+            losses = self.losses(anchors, pred_logits, pred_logits_1, pred_logits_2, gt_labels, gt_labels_1, gt_labels_2, pred_anchor_deltas, gt_boxes)
 
             if self.vis_period > 0:
                 storage = get_event_storage()
@@ -306,15 +306,41 @@ class RetinaNet(nn.Module):
                 "loss_cls" and "loss_box_reg"
         """
         num_images = len(gt_labels)
+        num_images_1 = len(gt_labels_1)
+        num_images_2 = len(gt_labels_2)
+
         gt_labels = torch.stack(gt_labels)  # (N, R)
+        gt_labels_1 = torch.stack(gt_labels_1)  # (N, R)
+        gt_labels_2 = torch.stack(gt_labels_2)  # (N, R)
+
         anchors = type(anchors[0]).cat(anchors).tensor  # (R, 4)
         gt_anchor_deltas = [self.box2box_transform.get_deltas(anchors, k) for k in gt_boxes]
         gt_anchor_deltas = torch.stack(gt_anchor_deltas)  # (N, R, 4)
 
         valid_mask = gt_labels >= 0
+        valid_mask_1 = gt_labels_1 >= 0
+        valid_mask_2 = gt_labels_2 >= 0
+        
         pos_mask = (gt_labels >= 0) & (gt_labels != self.num_classes)
+        pos_mask_1 = (gt_labels_1 >= 0) & (gt_labels_1 != self.num_classes)
+        pos_mask_2 = (gt_labels_2 >= 0) & (gt_labels_2 != self.num_classes)
+
         num_pos_anchors = pos_mask.sum().item()
+        num_pos_anchors_1 = pos_mask_1.sum().item()
+        num_pos_anchors_2 = pos_mask_2.sum().item()
+
         get_event_storage().put_scalar("num_pos_anchors", num_pos_anchors / num_images)
+        get_event_storage().put_scalar("num_pos_anchors", num_pos_anchors_1 / num_images_1)
+        get_event_storage().put_scalar("num_pos_anchors", num_pos_anchors_2 / num_images_2)
+
+        self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
+            1 - self.loss_normalizer_momentum
+        ) * max(num_pos_anchors, 1)
+
+        self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
+            1 - self.loss_normalizer_momentum
+        ) * max(num_pos_anchors, 1)
+
         self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
             1 - self.loss_normalizer_momentum
         ) * max(num_pos_anchors, 1)
@@ -322,7 +348,15 @@ class RetinaNet(nn.Module):
         # classification and regression loss
         gt_labels_target = F.one_hot(gt_labels[valid_mask], num_classes=self.num_classes + 1)[
             :, :-1
-        ]  # no loss for the last (background) class
+        ] 
+        gt_labels_target_1 = F.one_hot(gt_labels_1[valid_mask_1], num_classes=3 + 1)[
+            :, :-1
+        ] 
+        gt_labels_target_2 = F.one_hot(gt_labels_2[valid_mask_2], num_classes=3 + 1)[
+            :, :-1
+        ] 
+        
+         # no loss for the last (background) class
         loss_cls = sigmoid_focal_loss_jit(
             cat(pred_logits, dim=1)[valid_mask],
             gt_labels_target.to(pred_logits[0].dtype),
@@ -332,16 +366,16 @@ class RetinaNet(nn.Module):
         )
 
         loss_cls_1 = sigmoid_focal_loss_jit(
-            cat(pred_logits_1, dim=1)[valid_mask],
-            gt_labels_target.to(pred_logits_1[0].dtype),
+            cat(pred_logits_1, dim=1)[valid_mask_1],
+            gt_labels_target_1.to(pred_logits_1[0].dtype),
             alpha=self.focal_loss_alpha,
             gamma=self.focal_loss_gamma,
             reduction="sum",
         )
 
         loss_cls_2 = sigmoid_focal_loss_jit(
-            cat(pred_logits_2, dim=1)[valid_mask],
-            gt_labels_target.to(pred_logits_2[0].dtype),
+            cat(pred_logits_2, dim=1)[valid_mask_2],
+            gt_labels_target_2.to(pred_logits_2[0].dtype),
             alpha=self.focal_loss_alpha,
             gamma=self.focal_loss_gamma,
             reduction="sum",
@@ -394,7 +428,8 @@ class RetinaNet(nn.Module):
         """
         anchors = Boxes.cat(anchors)  # Rx4
 
-        gt_labels = []
+        gt_labels, gt_labels_1, gt_labels_2 = [],[],[]#change
+
         matched_gt_boxes = []
         for gt_per_image in gt_instances:
             match_quality_matrix = pairwise_iou(gt_per_image.gt_boxes, anchors)
@@ -405,18 +440,28 @@ class RetinaNet(nn.Module):
                 matched_gt_boxes_i = gt_per_image.gt_boxes.tensor[matched_idxs]
 
                 gt_labels_i = gt_per_image.gt_classes[matched_idxs]
+                gt_labels_i_1 = gt_per_image.gt_classes_1[matched_idxs]
+                gt_labels_i_2 = gt_per_image.gt_classes_2[matched_idxs]
                 # Anchors with label 0 are treated as background.
                 gt_labels_i[anchor_labels == 0] = self.num_classes
+                gt_labels_i_1[anchor_labels == 0] = self.num_classes
+                gt_labels_i_2[anchor_labels == 0] = self.num_classes
                 # Anchors with label -1 are ignored.
                 gt_labels_i[anchor_labels == -1] = -1
+                gt_labels_i_1[anchor_labels == -1] = -1
+                gt_labels_i_2[anchor_labels == -1] = -1
             else:
                 matched_gt_boxes_i = torch.zeros_like(anchors.tensor)
                 gt_labels_i = torch.zeros_like(matched_idxs) + self.num_classes
+                gt_labels_i_1 = torch.zeros_like(matched_idxs) + self.num_classes
+                gt_labels_i_2 = torch.zeros_like(matched_idxs) + self.num_classes
 
             gt_labels.append(gt_labels_i)
+            gt_labels_1.append(gt_labels_i_1)
+            gt_labels_2.append(gt_labels_i_2)
             matched_gt_boxes.append(matched_gt_boxes_i)
 
-        return gt_labels, matched_gt_boxes
+        return gt_labels, gt_labels_1, gt_labels_2, matched_gt_boxes
 
     def inference(
         self,
