@@ -306,8 +306,8 @@ class RetinaNet(nn.Module):
                 "loss_cls" and "loss_box_reg"
         """
         num_images = len(gt_labels)
-        num_images_1 = len(gt_labels_1)
-        num_images_2 = len(gt_labels_2)
+        # num_images_1 = len(gt_labels_1)
+        # num_images_2 = len(gt_labels_2)
 
         gt_labels = torch.stack(gt_labels)  # (N, R)
         gt_labels_1 = torch.stack(gt_labels_1)  # (N, R)
@@ -322,8 +322,8 @@ class RetinaNet(nn.Module):
         valid_mask_2 = gt_labels_2 >= 0
         
         pos_mask = (gt_labels >= 0) & (gt_labels != self.num_classes)
-        pos_mask_1 = (gt_labels_1 >= 0) & (gt_labels_1 != self.num_classes)
-        pos_mask_2 = (gt_labels_2 >= 0) & (gt_labels_2 != self.num_classes)
+        pos_mask_1 = (gt_labels_1 >= 0) & (gt_labels_1 != 3)
+        pos_mask_2 = (gt_labels_2 >= 0) & (gt_labels_2 != 3)
 
         num_pos_anchors = pos_mask.sum().item()
         num_pos_anchors_1 = pos_mask_1.sum().item()
@@ -444,8 +444,8 @@ class RetinaNet(nn.Module):
                 gt_labels_i_2 = gt_per_image.gt_classes_2[matched_idxs]
                 # Anchors with label 0 are treated as background.
                 gt_labels_i[anchor_labels == 0] = self.num_classes
-                gt_labels_i_1[anchor_labels == 0] = self.num_classes
-                gt_labels_i_2[anchor_labels == 0] = self.num_classes
+                gt_labels_i_1[anchor_labels == 0] = 3
+                gt_labels_i_2[anchor_labels == 0] = 3
                 # Anchors with label -1 are ignored.
                 gt_labels_i[anchor_labels == -1] = -1
                 gt_labels_i_1[anchor_labels == -1] = -1
@@ -453,8 +453,8 @@ class RetinaNet(nn.Module):
             else:
                 matched_gt_boxes_i = torch.zeros_like(anchors.tensor)
                 gt_labels_i = torch.zeros_like(matched_idxs) + self.num_classes
-                gt_labels_i_1 = torch.zeros_like(matched_idxs) + self.num_classes
-                gt_labels_i_2 = torch.zeros_like(matched_idxs) + self.num_classes
+                gt_labels_i_1 = torch.zeros_like(matched_idxs) + 3
+                gt_labels_i_2 = torch.zeros_like(matched_idxs) + 3
 
             gt_labels.append(gt_labels_i)
             gt_labels_1.append(gt_labels_i_1)
