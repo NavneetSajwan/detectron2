@@ -253,8 +253,8 @@ class RetinaNet(nn.Module):
         pred_logits, pred_logits_1, pred_logits_2, pred_anchor_deltas = self.head(features)
         # Transpose the Hi*Wi*A dimension to the middle:
         pred_logits = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits]
-        pred_logits_1 = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits_1]
-        pred_logits_2 = [permute_to_N_HWA_K(x, self.num_classes) for x in pred_logits_2]
+        pred_logits_1 = [permute_to_N_HWA_K(x, 3) for x in pred_logits_1]
+        pred_logits_2 = [permute_to_N_HWA_K(x, 3) for x in pred_logits_2]
         pred_anchor_deltas = [permute_to_N_HWA_K(x, 4) for x in pred_anchor_deltas]
 
         if self.training:
@@ -318,16 +318,17 @@ class RetinaNet(nn.Module):
         gt_anchor_deltas = torch.stack(gt_anchor_deltas)  # (N, R, 4)
 
         valid_mask = gt_labels >= 0
-        # valid_mask_1 = gt_labels_1 >= 0
-        # valid_mask_2 = gt_labels_2 >= 0
+        valid_mask_1 = gt_labels_1 >= 0
+        valid_mask_2 = gt_labels_2 >= 0
         
         pos_mask = (gt_labels >= 0) & (gt_labels != self.num_classes)
-        # pos_mask_1 = (gt_labels_1 >= 0) & (gt_labels_1 != 3)
-        # pos_mask_2 = (gt_labels_2 >= 0) & (gt_labels_2 != 3)
+        pos_mask_1 = (gt_labels_1 >= 0) & (gt_labels_1 != 3)
+        pos_mask_2 = (gt_labels_2 >= 0) & (gt_labels_2 != 3)
+        print(len(pos_mask[0]), len(pos_mask_1[0]), len(pos_mask_2[0]))
 
         num_pos_anchors = pos_mask.sum().item()
-        # num_pos_anchors_1 = pos_mask_1.sum().item()
-        # num_pos_anchors_2 = pos_mask_2.sum().item()
+        num_pos_anchors_1 = pos_mask_1.sum().item()
+        num_pos_anchors_2 = pos_mask_2.sum().item()
 
         get_event_storage().put_scalar("num_pos_anchors", num_pos_anchors / num_images)
         # get_event_storage().put_scalar("num_pos_anchors", num_pos_anchors_1 / num_images_1)
@@ -337,22 +338,22 @@ class RetinaNet(nn.Module):
             1 - self.loss_normalizer_momentum
         ) * max(num_pos_anchors, 1)
 
-        # self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
-        #     1 - self.loss_normalizer_momentum
-        # ) * max(num_pos_anchors, 1)
+        self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
+            1 - self.loss_normalizer_momentum
+        ) * max(num_pos_anchors, 1)
 
-        # self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
-        #     1 - self.loss_normalizer_momentum
-        # ) * max(num_pos_anchors, 1)
+        self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
+            1 - self.loss_normalizer_momentum
+        ) * max(num_pos_anchors, 1)
 
         # classification and regression loss
         gt_labels_target = F.one_hot(gt_labels[valid_mask], num_classes=self.num_classes + 1)[
             :, :-1
         ] 
-        gt_labels_target_1 = F.one_hot(gt_labels_1[valid_mask], num_classes=3 + 1)[
+        gt_labels_target_1 = F.one_hot(gt_labels_1[valid_mask_1], num_classes=3 + 1)[
             :, :-1
         ] 
-        gt_labels_target_2 = F.one_hot(gt_labels_2[valid_mask], num_classes=3 + 1)[
+        gt_labels_target_2 = F.one_hot(gt_labels_2[valid_mask_2], num_classes=3 + 1)[
             :, :-1
         ] 
         
@@ -366,7 +367,7 @@ class RetinaNet(nn.Module):
         )
 
         loss_cls_1 = sigmoid_focal_loss_jit(
-            cat(pred_logits_1, dim=1)[valid_mask],
+            cat(pred_logits_1, dim=1)[valid_mask_1],
             gt_labels_target_1.to(pred_logits_1[0].dtype),
             alpha=self.focal_loss_alpha,
             gamma=self.focal_loss_gamma,
@@ -374,7 +375,7 @@ class RetinaNet(nn.Module):
         )
 
         loss_cls_2 = sigmoid_focal_loss_jit(
-            cat(pred_logits_2, dim=1)[valid_mask],
+            cat(pred_logits_2, dim=1)[valid_mask_2],
             gt_labels_target_2.to(pred_logits_2[0].dtype),
             alpha=self.focal_loss_alpha,
             gamma=self.focal_loss_gamma,
